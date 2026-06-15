@@ -15,7 +15,7 @@ ADMIN_ID = 6499973284
 GITHUB_URL = 'https://github.com/akhbel125-dev/my-first-tg-bot'
 
 
-bot = Bot(token=API_TOKEN, session=session, default=DefaultBotProperties(parse_mode="Markdown"))
+bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="Markdown"))
 dp = Dispatcher()
 ai_client = Groq(api_key=GROQ_API_KEY)
 
