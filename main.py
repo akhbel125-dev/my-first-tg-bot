@@ -9,7 +9,7 @@ from aiogram.client.bot import DefaultBotProperties
 from groq import Groq
 
 # ---- НАСТРОЙКИ И ТОКЕНЫ ----
-API_TOKEN = '8950772471:AAEd6iaWv-qs1s0tWBiywobpihOduHiqiQU'
+API_TOKEN = '8950772471:AAEBaTKh_wUU9V_tw7_HT2lZbckbvzbL7Lo'
 GROQ_API_KEY = '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'
 ADMIN_ID = 6499973284
 GITHUB_URL = 'https://github.com/akhbel125-dev/my-first-tg-bot'
