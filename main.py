@@ -14,8 +14,6 @@ GROQ_API_KEY = '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'
 ADMIN_ID = 6499973284
 GITHUB_URL = 'https://github.com/akhbel125-dev/my-first-tg-bot'
 
-# Защищаем соединение от тайм-аутов
-session = AiohttpSession(timeout=40.0)
 
 bot = Bot(token=API_TOKEN, session=session, default=DefaultBotProperties(parse_mode="Markdown"))
 dp = Dispatcher()
