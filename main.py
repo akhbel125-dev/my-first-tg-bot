@@ -45,7 +45,7 @@ async def handle_message(message: Message):
     try:
         # Строгий и безопасный формат запроса к Llama 3 через Groq
         completion = ai_client.chat.completions.create(
-            model="llama3-8b-8192",
+            model="llama-3.1-8b-instant",
             messages=[
                 {"role": "user", "content": message.text}
             ]
