@@ -1,9 +1,9 @@
 import asyncio
 import os
-import sqlite3  # Настоящая база данных
+import sqlite3  # База данных SQLite
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, \
-    FSInputFile
+    FSInputFile, WebAppInfo  # Добавили WebAppInfo для открытия сайтов внутри ТГ
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from groq import Groq
@@ -20,7 +20,7 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 ai_client = Groq(api_key=GROQ_API_KEY)
 
-# Сюда бот будет временно сохранять переписку пользователей, чтобы помнить контекст
+# Сюда бот временно сохраняет переписку пользователей для памяти контекста
 user_contexts = {}
 
 # ---- СУПЕР-ИНСТРУКЦИЯ ДЛЯ ИИ (АНОНИМНАЯ) ----
@@ -64,9 +64,10 @@ admin_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# 🔥 ВОТ ОНА: Инлайн-кнопка, переделанная под полноценный WebApp!
 github_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="Открыть репозиторий 🚀", url=GITHUB_URL)]
+        [InlineKeyboardButton(text="Открыть GitHub внутри Telegram 📱", web_app=WebAppInfo(url=GITHUB_URL))]
     ]
 )
 
@@ -124,7 +125,7 @@ def get_all_users_ids():
 async def send_welcome(message: Message, state: FSMContext):
     await state.clear()
 
-    # При старте очищаем память ИИ для этого пользователя, чтобы начать диалог с чистого листа
+    # При старте очищаем память ИИ для этого пользователя
     if message.from_user.id in user_contexts:
         user_contexts[message.from_user.id] = []
 
@@ -160,7 +161,7 @@ async def about_me(message: Message):
 @dp.message(F.text == "Посмотреть мой GitHub 📂")
 async def show_github(message: Message):
     await message.answer(
-        "Нажми на кнопку ниже, чтобы перейти в мой публичный репозиторий и оценить код этого бота:",
+        "Нажми на кнопку ниже, чтобы запустить WebApp-приложение и оценить мой репозиторий прямо внутри Telegram:",
         reply_markup=github_keyboard
     )
 
@@ -182,7 +183,7 @@ async def order_process_business(message: Message, state: FSMContext):
     await state.set_state(BotStates.waiting_for_features)
     await message.answer(
         "📊 **Шаг 2 из 3**\n\n"
-        "Какие функции должны быть в боте? (Например: рассылка пользователям, прием оплаты, админ-панель, интеграция с нейросетью):"
+        "Какие функции должны быть в боте? (Например: рассылка пользователям, прием оплаты, admin-панель, интеграция с нейросетью):"
     )
 
 
@@ -291,18 +292,14 @@ async def ai_chat_handler(message: Message):
 
     user_id = message.from_user.id
 
-    # Если пользователя еще нет в словаре контекстов, создаем ему пустой список
     if user_id not in user_contexts:
         user_contexts[user_id] = []
 
-    # Добавляем новое сообщение пользователя в его историю
     user_contexts[user_id].append({"role": "user", "content": message.text})
 
-    # Удерживаем в памяти только последние 10 сообщений (5 реплик пользователя + 5 ИИ), чтобы не перегружать токены
     if len(user_contexts[user_id]) > 10:
         user_contexts[user_id] = user_contexts[user_id][-10:]
 
-    # Собираем полный пакет для отправки: системный промпт + вся история сообщений
     messages_payload = [{"role": "system", "content": SYSTEM_PROMPT}] + user_contexts[user_id]
 
     try:
@@ -313,10 +310,7 @@ async def ai_chat_handler(message: Message):
         )
 
         ai_response = chat_completion.choices[0].message.content
-
-        # Добавляем ответ самого ИИ в историю, чтобы он помнил, что ответил!
         user_contexts[user_id].append({"role": "assistant", "content": ai_response})
-
         await message.answer(ai_response)
 
     except Exception as e:
@@ -328,7 +322,7 @@ async def ai_chat_handler(message: Message):
 # ---- ЗАПУСК БОТА ----
 async def main():
     init_db()  # Запускаем создание базы данных SQLite
-    print("Бот со встроенным ИИ, SQLite, контекстной памятью и админкой успешно запущен!")
+    print("Бот со встроенным ИИ, SQLite, контекстной памятью, WebApp и админкой успешно запущен!")
     await dp.start_polling(bot)
 
 
