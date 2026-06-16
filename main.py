@@ -1,6 +1,6 @@
 import asyncio
 import os
-import sqlite3  # Подключаем настоящую базу данных
+import sqlite3  # Настоящая база данных
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, \
     FSInputFile
@@ -13,12 +13,15 @@ API_TOKEN = '8950772471:AAEBaTKh_wUU9V_tw7_HT2lZbckbvzbL7Lo'
 GROQ_API_KEY = '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'
 ADMIN_ID = 6499973284
 GITHUB_URL = 'https://github.com/akhbel125-dev/my-first-tg-bot'
-DB_FILE = 'bot_database.db'  # Теперь это файл базы данных SQLite
+DB_FILE = 'bot_database.db'  # Файл базы данных SQLite
 
 # Инициализируем бота, диспетчер и ИИ-клиент Groq
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 ai_client = Groq(api_key=GROQ_API_KEY)
+
+# Сюда бот будет временно сохранять переписку пользователей, чтобы помнить контекст
+user_contexts = {}
 
 # ---- СУПЕР-ИНСТРУКЦИЯ ДЛЯ ИИ (АНОНИМНАЯ) ----
 SYSTEM_PROMPT = (
@@ -74,7 +77,6 @@ def init_db():
     """Создает таблицу пользователей, если её еще нет в базе данных"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    # Создаем таблицу из трех колонок: ID, Юзернейм и Полное имя
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -87,10 +89,9 @@ def init_db():
 
 
 def save_user(user_id: int, username: str, full_name: str):
-    """Сохраняет пользователя в базу данных SQLite (если его там нет, старые не дублируются)"""
+    """Сохраняет пользователя в базу данных SQLite"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    # INSERT OR IGNORE автоматически пропустит запись, если такой user_id уже существует
     cursor.execute('INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)',
                    (user_id, username, full_name))
     conn.commit()
@@ -114,7 +115,6 @@ def get_all_users_ids():
     cursor.execute('SELECT user_id FROM users')
     rows = cursor.fetchall()
     conn.close()
-    # Превращаем список кортежей [(123,), (456,)] в обычный список [123, 456]
     return [row[0] for row in rows]
 
 
@@ -124,10 +124,12 @@ def get_all_users_ids():
 async def send_welcome(message: Message, state: FSMContext):
     await state.clear()
 
-    # Получаем юзернейм, если он есть, или пишем "нет"
+    # При старте очищаем память ИИ для этого пользователя, чтобы начать диалог с чистого листа
+    if message.from_user.id in user_contexts:
+        user_contexts[message.from_user.id] = []
+
     tg_username = message.from_user.username if message.from_user.username else "нет"
 
-    # Сохраняем пользователя в нашу новую взрослую базу SQLite
     save_user(
         user_id=message.from_user.id,
         username=tg_username,
@@ -190,7 +192,7 @@ async def order_process_features(message: Message, state: FSMContext):
     await state.set_state(BotStates.waiting_for_budget)
     await message.answer(
         "💰 **Шаг 3 из 3**\n\n"
-        "Укажи твой примерный budget (если знаешь) и оставь контакты для связи (твой юзернейм `@username` или телефон):"
+        "Укажи твой примерный бюджет (если знаешь) и оставь контакты для связи (твой юзернейм `@username` или телефон):"
     )
 
 
@@ -278,7 +280,7 @@ async def close_admin_panel(message: Message):
         await message.answer("Вы вышли из админ-панели. Возвращаю стандартное меню.", reply_markup=main_keyboard)
 
 
-# ---- РАБОТА ИСКУССТВЕННОГО ИНТЕЛЛЕКТА (ОБЫЧНЫЕ СООБЩЕНИЯ) ----
+# ---- РАБОТА ИСКУССТВЕННОГО ИНТЕЛЛЕКТА С ПАМЯТЬЮ КОНТЕКСТА ----
 
 @dp.message()
 async def ai_chat_handler(message: Message):
@@ -287,17 +289,34 @@ async def ai_chat_handler(message: Message):
 
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
 
+    user_id = message.from_user.id
+
+    # Если пользователя еще нет в словаре контекстов, создаем ему пустой список
+    if user_id not in user_contexts:
+        user_contexts[user_id] = []
+
+    # Добавляем новое сообщение пользователя в его историю
+    user_contexts[user_id].append({"role": "user", "content": message.text})
+
+    # Удерживаем в памяти только последние 10 сообщений (5 реплик пользователя + 5 ИИ), чтобы не перегружать токены
+    if len(user_contexts[user_id]) > 10:
+        user_contexts[user_id] = user_contexts[user_id][-10:]
+
+    # Собираем полный пакет для отправки: системный промпт + вся история сообщений
+    messages_payload = [{"role": "system", "content": SYSTEM_PROMPT}] + user_contexts[user_id]
+
     try:
         chat_completion = ai_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": message.text}
-            ],
+            messages=messages_payload,
             model="llama-3.1-8b-instant",
             temperature=0.7,
         )
 
         ai_response = chat_completion.choices[0].message.content
+
+        # Добавляем ответ самого ИИ в историю, чтобы он помнил, что ответил!
+        user_contexts[user_id].append({"role": "assistant", "content": ai_response})
+
         await message.answer(ai_response)
 
     except Exception as e:
@@ -308,8 +327,8 @@ async def ai_chat_handler(message: Message):
 
 # ---- ЗАПУСК БОТА ----
 async def main():
-    init_db()  # Обязательно запускаем создание базы данных SQLite перед стартом опроса Телеграм
-    print("Бот со встроенным ИИ, SQLite и админкой успешно запущен!")
+    init_db()  # Запускаем создание базы данных SQLite
+    print("Бот со встроенным ИИ, SQLite, контекстной памятью и админкой успешно запущен!")
     await dp.start_polling(bot)
 
 
