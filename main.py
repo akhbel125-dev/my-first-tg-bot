@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sqlite3  # Подключаем настоящую базу данных
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, \
     FSInputFile
@@ -12,7 +13,7 @@ API_TOKEN = '8950772471:AAEBaTKh_wUU9V_tw7_HT2lZbckbvzbL7Lo'
 GROQ_API_KEY = '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'
 ADMIN_ID = 6499973284
 GITHUB_URL = 'https://github.com/akhbel125-dev/my-first-tg-bot'
-DB_FILE = 'users.txt'  # Файл, где будут храниться ID пользователей
+DB_FILE = 'bot_database.db'  # Теперь это файл базы данных SQLite
 
 # Инициализируем бота, диспетчер и ИИ-клиент Groq
 bot = Bot(token=API_TOKEN)
@@ -67,31 +68,54 @@ github_keyboard = InlineKeyboardMarkup(
 )
 
 
-# ---- ФУНКЦИИ ДЛЯ РАБОТЫ С БАЗОЙ ДАННЫХ (ФАЙЛОМ) ----
+# ---- ФУНКЦИИ ДЛЯ РАБОТЫ С БАЗОЙ ДАННЫХ SQLITE ----
 
-def save_user(user_id: int):
-    """Добавляет ID пользователя в файл, если его там еще нет"""
-    user_id_str = str(user_id)
-    if not os.path.exists(DB_FILE):
-        with open(DB_FILE, 'w') as f:
-            f.write(user_id_str + '\n')
-        return
+def init_db():
+    """Создает таблицу пользователей, если её еще нет в базе данных"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    # Создаем таблицу из трех колонок: ID, Юзернейм и Полное имя
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            full_name TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-    with open(DB_FILE, 'r') as f:
-        users = f.read().splitlines()
 
-    if user_id_str not in users:
-        with open(DB_FILE, 'a') as f:
-            f.write(user_id_str + '\n')
+def save_user(user_id: int, username: str, full_name: str):
+    """Сохраняет пользователя в базу данных SQLite (если его там нет, старые не дублируются)"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    # INSERT OR IGNORE автоматически пропустит запись, если такой user_id уже существует
+    cursor.execute('INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)',
+                   (user_id, username, full_name))
+    conn.commit()
+    conn.close()
 
 
 def get_users_count() -> int:
-    """Возвращает количество уникальных пользователей"""
-    if not os.path.exists(DB_FILE):
-        return 0
-    with open(DB_FILE, 'r') as f:
-        users = f.read().splitlines()
-    return len(users)
+    """Возвращает точное количество уникальных пользователей из базы данных"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM users')
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_all_users_ids():
+    """Возвращает чистый список всех ID пользователей для рассылки"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id FROM users')
+    rows = cursor.fetchall()
+    conn.close()
+    # Превращаем список кортежей [(123,), (456,)] в обычный список [123, 456]
+    return [row[0] for row in rows]
 
 
 # ---- ОБРАБОТЧИКИ КОМАНД И КНОПОК ----
@@ -99,8 +123,16 @@ def get_users_count() -> int:
 @dp.message(F.text == "/start")
 async def send_welcome(message: Message, state: FSMContext):
     await state.clear()
-    # Сохраняем пользователя в нашу mini-базу данных
-    save_user(message.from_user.id)
+
+    # Получаем юзернейм, если он есть, или пишем "нет"
+    tg_username = message.from_user.username if message.from_user.username else "нет"
+
+    # Сохраняем пользователя в нашу новую взрослую базу SQLite
+    save_user(
+        user_id=message.from_user.id,
+        username=tg_username,
+        full_name=message.from_user.full_name
+    )
 
     await message.answer(
         f"Привет, {message.from_user.first_name}! Я бот-визитка с искусственным интеллектом.\n"
@@ -158,7 +190,7 @@ async def order_process_features(message: Message, state: FSMContext):
     await state.set_state(BotStates.waiting_for_budget)
     await message.answer(
         "💰 **Шаг 3 из 3**\n\n"
-        "Укажи твой примерный бюджет (если знаешь) и оставь контакты для связи (твой юзернейм `@username` или телефон):"
+        "Укажи твой примерный budget (если знаешь) и оставь контакты для связи (твой юзернейм `@username` или телефон):"
     )
 
 
@@ -171,7 +203,6 @@ async def order_process_finish(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         username = f"@{message.from_user.username}" if message.from_user.username else "скрыт/нет"
 
-        # Формируем красивый и понятный отчет о заказе для тебя
         report = (
             f"🚨 **ПОСТУПИЛ НОВЫЙ ЗАКАЗ С ПОЛНЫМ ОПИСАНИЕМ!**\n\n"
             f"👤 **Имя клиента:** {message.from_user.full_name}\n"
@@ -205,7 +236,7 @@ async def show_stats(message: Message):
     if message.from_user.id == ADMIN_ID:
         count = get_users_count()
         await message.answer(
-            f"📊 **СТАТИСТИКА БОТА**\n\nВ базе данных зарегистрировано всего пользователей: **{count}**")
+            f"📊 **СТАТИСТИКА БОТА**\n\nВ базе данных SQLite зарегистрировано всего пользователей: **{count}**")
 
 
 @dp.message(F.text == "📢 Сделать рассылку")
@@ -220,21 +251,19 @@ async def do_broadcast(message: Message, state: FSMContext):
     if message.from_user.id == ADMIN_ID:
         await state.clear()
 
-        if not os.path.exists(DB_FILE):
-            await message.answer("База данных пуста!")
+        users = get_all_users_ids()
+        if not users:
+            await message.answer("База данных SQLite пуста!")
             return
 
-        with open(DB_FILE, 'r') as f:
-            users = f.read().splitlines()
-
-        await message.answer(f"Начинаю рассылку для {len(users)} пользователей... ⏳")
+        await message.answer(f"Начинаю рассылку для {len(users)} пользователей из базы SQLite... ⏳")
 
         success_count = 0
         for u_id in users:
             try:
                 await bot.send_message(chat_id=int(u_id), text=message.text)
                 success_count += 1
-                await asyncio.sleep(0.05)  # Небольшая задержка, чтобы Телеграм не забанил за спам
+                await asyncio.sleep(0.05)
             except Exception:
                 continue
 
@@ -279,7 +308,8 @@ async def ai_chat_handler(message: Message):
 
 # ---- ЗАПУСК БОТА ----
 async def main():
-    print("Бот со встроенным ИИ и админкой успешно запущен!")
+    init_db()  # Обязательно запускаем создание базы данных SQLite перед стартом опроса Телеграм
+    print("Бот со встроенным ИИ, SQLite и админкой успешно запущен!")
     await dp.start_polling(bot)
 
 
