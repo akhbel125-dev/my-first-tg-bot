@@ -32,9 +32,11 @@ SYSTEM_PROMPT = (
 )
 
 
-# ---- СОСТОЯНИЯ (FSM) ----
+# ---- СОСТОЯНИЯ (FSM) ДЛЯ ПОШАГОВОГО ОПРОСА КЛИЕНТА ----
 class BotStates(StatesGroup):
-    waiting_for_tz = State()  # Ожидание текста заказа от пользователя
+    waiting_for_business = State()  # Шаг 1: сфера бизнеса
+    waiting_for_features = State()  # Шаг 2: функции бота
+    waiting_for_budget = State()  # Шаг 3: бюджет и контакты
     waiting_for_broadcast = State()  # Ожидание текста рассылки от админа
 
 
@@ -97,7 +99,7 @@ def get_users_count() -> int:
 @dp.message(F.text == "/start")
 async def send_welcome(message: Message, state: FSMContext):
     await state.clear()
-    # Сохраняем пользователя в нашу мини-базу данных
+    # Сохраняем пользователя в нашу mini-базу данных
     save_user(message.from_user.id)
 
     await message.answer(
@@ -129,37 +131,62 @@ async def show_github(message: Message):
     )
 
 
-# ---- ЛОГИКА ЗАКАЗА ВОБЩЕ КЛИЕНТА ----
+# ---- ПОШАГОВЫЙ КОНСТРУКТОР ЗАКАЗА (КНОПКА ЗАКАЗАТЬ БОТА) ----
 
 @dp.message(F.text == "Заказать бота 💰")
-async def order_process(message: Message, state: FSMContext):
-    await state.set_state(BotStates.waiting_for_tz)
+async def order_process_start(message: Message, state: FSMContext):
+    await state.set_state(BotStates.waiting_for_business)
     await message.answer(
-        "Прекрасно! Напиши прямо сейчас **одним сообщением**:\n\n"
-        "1. Какого бота ты хочешь получить (ТЗ/идея).\n"
-        "2. Твой бюджет (если знаешь).\n"
-        "3. Как с тобой связаться.\n\n"
-        "Следующее твое сообщение будет отправлено напрямую разработчику! 👇"
+        "🚀 **Запуск конструктора заказа!**\n\n"
+        "Шаг 1 из 3: Для какой сферы бизнеса или для каких целей нужен бот? (Например: магазин одежды, автосервис, турниры по FC Mobile, личный блог):"
     )
 
 
-@dp.message(BotStates.waiting_for_tz)
-async def forward_tz_to_admin(message: Message, state: FSMContext):
+@dp.message(BotStates.waiting_for_business)
+async def order_process_business(message: Message, state: FSMContext):
+    await state.update_data(business=message.text)
+    await state.set_state(BotStates.waiting_for_features)
+    await message.answer(
+        "📊 **Шаг 2 из 3**\n\n"
+        "Какие функции должны быть в боте? (Например: рассылка пользователям, прием оплаты, админ-панель, интеграция с нейросетью):"
+    )
+
+
+@dp.message(BotStates.waiting_for_features)
+async def order_process_features(message: Message, state: FSMContext):
+    await state.update_data(features=message.text)
+    await state.set_state(BotStates.waiting_for_budget)
+    await message.answer(
+        "💰 **Шаг 3 из 3**\n\n"
+        "Укажи твой примерный бюджет (если знаешь) и оставь контакты для связи (твой юзернейм `@username` или телефон):"
+    )
+
+
+@dp.message(BotStates.waiting_for_budget)
+async def order_process_finish(message: Message, state: FSMContext):
+    user_data = await state.get_data()
+    budget_and_contact = message.text
+    await state.clear()
+
     if message.from_user.id != ADMIN_ID:
         username = f"@{message.from_user.username}" if message.from_user.username else "скрыт/нет"
+
+        # Формируем красивый и понятный отчет о заказе для тебя
         report = (
-            f"🚨 **НОВЫЙ ЗАКАЗ В БОТЕ!**\n\n"
-            f"👤 **Имя:** {message.from_user.full_name}\n"
-            f"🔗 **Юзернейм:** {username}\n"
+            f"🚨 **ПОСТУПИЛ НОВЫЙ ЗАКАЗ С ПОЛНЫМ ОПИСАНИЕМ!**\n\n"
+            f"👤 **Имя клиента:** {message.from_user.full_name}\n"
+            f"🔗 **Юзернейм в ТГ:** {username}\n"
             f"🆔 **ID пользователя:** {message.from_user.id}\n\n"
-            f"📋 **Текст заявки:**\n{message.text}"
+            f"🏢 **Сфера/Цель проекта:**\n{user_data['business']}\n\n"
+            f"⚙️ **Что должен делать бот (Функции):**\n{user_data['features']}\n\n"
+            f"💵 **Бюджет и контакты для связи:**\n{budget_and_contact}"
         )
         await bot.send_message(chat_id=ADMIN_ID, text=report, parse_mode="Markdown")
-        await message.answer("Ваша заявка успешно отправлена разработчику! Он свяжется с вами в ближайшее время. 🚀")
+        await message.answer(
+            "Ваша заявка успешно оформлена и отправлена разработчику! Он свяжется с вами в ближайшее время. 🚀")
     else:
-        await message.answer("Хозяин, тест прошел успешно! Заявка перехвачена, но самому себе дублировать не буду. 👍")
-
-    await state.clear()
+        await message.answer(
+            "Хозяин, тест конструктора прошел успешно! Заявку зафиксировал, но самому себе пересылать не буду. 👍")
 
 
 # ---- СЕКРЕТНАЯ АДМИН-ПАНЕЛЬ (ТОЛЬКО ДЛЯ ТЕБЯ) ----
@@ -170,7 +197,6 @@ async def open_admin_panel(message: Message):
         await message.answer("Добро пожаловать в секретную панель управления, Хозяин! Выберите действие:",
                              reply_markup=admin_keyboard)
     else:
-        # Для обычных пользователей команда пойдет в ИИ, как будто её нет
         pass
 
 
@@ -206,12 +232,10 @@ async def do_broadcast(message: Message, state: FSMContext):
         success_count = 0
         for u_id in users:
             try:
-                # Отправляем сообщение из рассылки каждому ID
                 await bot.send_message(chat_id=int(u_id), text=message.text)
                 success_count += 1
                 await asyncio.sleep(0.05)  # Небольшая задержка, чтобы Телеграм не забанил за спам
             except Exception:
-                # Если пользователь заблокировал бота, его пропустит
                 continue
 
         await message.answer(
@@ -229,9 +253,7 @@ async def close_admin_panel(message: Message):
 
 @dp.message()
 async def ai_chat_handler(message: Message):
-    # Если обычный пользователь ввел команду /admin, мы её пускаем в ИИ через условие
     if message.text == "/admin" and message.from_user.id != ADMIN_ID:
-        # ИИ обработает этот текст ниже
         pass
 
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
@@ -242,7 +264,7 @@ async def ai_chat_handler(message: Message):
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": message.text}
             ],
-            model="llama-3.1-8b-instant",  # Исправленная актуальная модель
+            model="llama-3.1-8b-instant",
             temperature=0.7,
         )
 
