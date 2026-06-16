@@ -1,30 +1,23 @@
 import asyncio
 import os
-import logging
-from aiogram.filters import CommandStart
 from aiogram import Bot, Dispatcher, F
-from aiogram.client.default import DefaultBotProperties
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, \
+    FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from groq import Groq
 
-# Включаем логирование, чтобы Render мгновенно выводил информацию
-logging.basicConfig(level=logging.INFO)
-
 # ---- НАСТРОЙКИ И ТОКЕНЫ ----
-# Твой самый новый рабочий токен
 API_TOKEN = '8950772471:AAEBaTKh_wUU9V_tw7_HT2lZbckbvzbL7Lo'
 GROQ_API_KEY = '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'
 ADMIN_ID = 6499973284
 GITHUB_URL = 'https://github.com/akhbel125-dev/my-first-tg-bot'
 DB_FILE = 'users.txt'  # Файл, где будут храниться ID пользователей
 
-# Инициализируем бота с поддержкой Markdown, диспетчер и ИИ-клиент Groq
-bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="Markdown"))
+# Инициализируем бота, диспетчер и ИИ-клиент Groq
+bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 ai_client = Groq(api_key=GROQ_API_KEY)
-
 
 # ---- СУПЕР-ИНСТРУКЦИЯ ДЛЯ ИИ (АНОНИМНАЯ) ----
 SYSTEM_PROMPT = (
@@ -41,8 +34,8 @@ SYSTEM_PROMPT = (
 
 # ---- СОСТОЯНИЯ (FSM) ----
 class BotStates(StatesGroup):
-    waiting_for_tz = State()        # Ожидание текста заказа от пользователя
-    waiting_for_broadcast = State() # Ожидание текста рассылки от админа
+    waiting_for_tz = State()  # Ожидание текста заказа от пользователя
+    waiting_for_broadcast = State()  # Ожидание текста рассылки от админа
 
 
 # ---- КЛАВИАТУРЫ ----
@@ -89,6 +82,7 @@ def save_user(user_id: int):
         with open(DB_FILE, 'a') as f:
             f.write(user_id_str + '\n')
 
+
 def get_users_count() -> int:
     """Возвращает количество уникальных пользователей"""
     if not os.path.exists(DB_FILE):
@@ -100,12 +94,12 @@ def get_users_count() -> int:
 
 # ---- ОБРАБОТЧИКИ КОМАНД И КНОПОК ----
 
-@dp.message(CommandStart())
+@dp.message(F.text == "/start")
 async def send_welcome(message: Message, state: FSMContext):
     await state.clear()
     # Сохраняем пользователя в нашу мини-базу данных
     save_user(message.from_user.id)
-    
+
     await message.answer(
         f"Привет, {message.from_user.first_name}! Я бот-визитка с искусственным интеллектом.\n"
         f"Ты можешь задать мне любой вопрос про разработку ботов прямо в чат, или воспользоваться меню ниже! 👇",
@@ -135,7 +129,7 @@ async def show_github(message: Message):
     )
 
 
-# ---- ЛОГИКА ЗАКАЗА ОТ КЛИЕНТА ----
+# ---- ЛОГИКА ЗАКАЗА ВОБЩЕ КЛИЕНТА ----
 
 @dp.message(F.text == "Заказать бота 💰")
 async def order_process(message: Message, state: FSMContext):
@@ -160,11 +154,11 @@ async def forward_tz_to_admin(message: Message, state: FSMContext):
             f"🆔 **ID пользователя:** {message.from_user.id}\n\n"
             f"📋 **Текст заявки:**\n{message.text}"
         )
-        await bot.send_message(chat_id=ADMIN_ID, text=report)
+        await bot.send_message(chat_id=ADMIN_ID, text=report, parse_mode="Markdown")
         await message.answer("Ваша заявка успешно отправлена разработчику! Он свяжется с вами в ближайшее время. 🚀")
     else:
         await message.answer("Хозяин, тест прошел успешно! Заявка перехвачена, но самому себе дублировать не буду. 👍")
-    
+
     await state.clear()
 
 
@@ -173,9 +167,10 @@ async def forward_tz_to_admin(message: Message, state: FSMContext):
 @dp.message(F.text == "/admin")
 async def open_admin_panel(message: Message):
     if message.from_user.id == ADMIN_ID:
-        await message.answer("Добро пожаловать в секретную панель управления, Хозяин! Выберите действие:", reply_markup=admin_keyboard)
+        await message.answer("Добро пожаловать в секретную панель управления, Хозяин! Выберите действие:",
+                             reply_markup=admin_keyboard)
     else:
-        # Для обычных пользователей команда просто проигнорируется здесь и уйдет в ИИ
+        # Для обычных пользователей команда пойдет в ИИ, как будто её нет
         pass
 
 
@@ -183,7 +178,8 @@ async def open_admin_panel(message: Message):
 async def show_stats(message: Message):
     if message.from_user.id == ADMIN_ID:
         count = get_users_count()
-        await message.answer(f"📊 **СТАТИСТИКА БОТА**\n\nВ базе данных зарегистрировано всего пользователей: **{count}**")
+        await message.answer(
+            f"📊 **СТАТИСТИКА БОТА**\n\nВ базе данных зарегистрировано всего пользователей: **{count}**")
 
 
 @dp.message(F.text == "📢 Сделать рассылку")
@@ -197,26 +193,30 @@ async def start_broadcast(message: Message, state: FSMContext):
 async def do_broadcast(message: Message, state: FSMContext):
     if message.from_user.id == ADMIN_ID:
         await state.clear()
-        
+
         if not os.path.exists(DB_FILE):
             await message.answer("База данных пуста!")
             return
-            
+
         with open(DB_FILE, 'r') as f:
             users = f.read().splitlines()
-            
+
         await message.answer(f"Начинаю рассылку для {len(users)} пользователей... ⏳")
-        
+
         success_count = 0
         for u_id in users:
             try:
+                # Отправляем сообщение из рассылки каждому ID
                 await bot.send_message(chat_id=int(u_id), text=message.text)
                 success_count += 1
-                await asyncio.sleep(0.05) # Задержка против спам-фильтра Telegram
+                await asyncio.sleep(0.05)  # Небольшая задержка, чтобы Телеграм не забанил за спам
             except Exception:
+                # Если пользователь заблокировал бота, его пропустит
                 continue
-                
-        await message.answer(f"📢 Рассылка завершена!\nУспешно доставлено сообщений: **{success_count}** из **{len(users)}**.", reply_markup=admin_keyboard)
+
+        await message.answer(
+            f"📢 Рассылка завершена!\nУспешно доставлено сообщений: **{success_count}** из **{len(users)}**.",
+            reply_markup=admin_keyboard)
 
 
 @dp.message(F.text == "🔙 Выйти из админки")
@@ -229,35 +229,37 @@ async def close_admin_panel(message: Message):
 
 @dp.message()
 async def ai_chat_handler(message: Message):
-    # Если обычный пользователь пытается ввести /admin, это перехватит ИИ
+    # Если обычный пользователь ввел команду /admin, мы её пускаем в ИИ через условие
     if message.text == "/admin" and message.from_user.id != ADMIN_ID:
+        # ИИ обработает этот текст ниже
         pass
 
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
-    
+
     try:
         chat_completion = ai_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": message.text}
             ],
-            model="llama-3.1-8b-instant",  # Новая рабочая модель вместо устаревшей
+            model="llama-3.1-8b-instant",  # Исправленная актуальная модель
             temperature=0.7,
         )
-        
+
         ai_response = chat_completion.choices[0].message.content
-        await message.answer(ai_response, parse_mode=None)
-        
+        await message.answer(ai_response)
+
     except Exception as e:
         print(f"Ошибка ИИ: {e}")
-        await message.answer("Извините, у моего процессора закружилась голова. Попробуйте написать еще раз чуть позже! 🧠")
+        await message.answer(
+            "Извините, у моего процессора закружилась голова. Попробуйте написать еще раз чуть позже! 🧠")
 
 
 # ---- ЗАПУСК БОТА ----
 async def main():
-    print("=== БОТ УСПЕШНО ЗАПУЩЕН! ===")
+    print("Бот со встроенным ИИ и админкой успешно запущен!")
     await dp.start_polling(bot)
 
+
 if __name__ == "__main__":
-    asyncio.run(main())
     asyncio.run(main())
