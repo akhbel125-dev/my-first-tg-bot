@@ -1,6 +1,7 @@
 import asyncio
 import os
 import logging
+from aiogram.filters import CommandStart
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
@@ -99,7 +100,7 @@ def get_users_count() -> int:
 
 # ---- ОБРАБОТЧИКИ КОМАНД И КНОПОК ----
 
-@dp.message(F.text == "/start")
+@dp.message(CommandStart())
 async def send_welcome(message: Message, state: FSMContext):
     await state.clear()
     # Сохраняем пользователя в нашу мини-базу данных
@@ -245,7 +246,7 @@ async def ai_chat_handler(message: Message):
         )
         
         ai_response = chat_completion.choices[0].message.content
-        await message.answer(ai_response)
+        await message.answer(ai_response, parse_mode=None)
         
     except Exception as e:
         print(f"Ошибка ИИ: {e}")
